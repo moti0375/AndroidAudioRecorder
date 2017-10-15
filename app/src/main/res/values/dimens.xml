@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="small_margin">2dp</dimen>
+    <dimen name="medium_margin">5dp</dimen>
+    <dimen name="large_margin">7dp</dimen>
+    <dimen name="fab_margin">16dp</dimen>
+    <dimen name="appbar_padding_top">8dp</dimen>
+    <dimen name="btn_corners_radius">5dp</dimen>
+    <dimen name="btn_stroke_width">1dp</dimen>
+
+</resources>
