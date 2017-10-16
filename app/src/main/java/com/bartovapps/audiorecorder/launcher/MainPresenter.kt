@@ -1,5 +1,6 @@
 package com.bartovapps.audiorecorder.launcher
 
+import android.icu.lang.UCharacter.GraphemeClusterBreak.L
 import android.media.*
 import android.util.Log
 import kotlin.experimental.and
@@ -11,6 +12,7 @@ import android.os.SystemClock
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import io.kvh.media.amr.AmrEncoder
+import java.text.DecimalFormat
 import java.util.*
 
 
@@ -18,12 +20,8 @@ import java.util.*
  * Created by motibartov on 08/10/2017.
  */
 
-class MainPresenter : MainContract.Presenter, AudioTrack.OnPlaybackPositionUpdateListener {
+class MainPresenter (val mainView: MainContract.View): MainContract.Presenter  {
 
-
-    init {
-        prepareAudioRecorder()
-    }
 
     companion object {
         val TAG = MainPresenter::class.java.simpleName
@@ -38,11 +36,19 @@ class MainPresenter : MainContract.Presenter, AudioTrack.OnPlaybackPositionUpdat
         val pcmFilePath = "/sdcard/8k16bitMono.pcm"
         val wavFilePath = "/sdcard/testRecord.wav"
         val amrFilePath = "/sdcard/testRecord.amr"
-
     }
+    val mMediaPlayer = MediaPlayer()
+    init {
+        mMediaPlayer.setOnCompletionListener {
+            mainView.updateProgress(mMediaPlayer.currentPosition)
+            mTimer?.cancel()
+            mainView.showRecordingStopped()
+        }
+    }
+    lateinit var mTimerTask: TimerTask
+    var mTimer : Timer? = null
 
     lateinit var recorder: AudioRecord
-    lateinit var player: AudioTrack
     var recordingThread: Thread? = null
     var isRecording = false
 
@@ -50,7 +56,7 @@ class MainPresenter : MainContract.Presenter, AudioTrack.OnPlaybackPositionUpdat
     var BytesPerElement = 2 // 2 bytes in 16bit format
     var readBufferSize = 0
     lateinit var androidLame: AndroidLame
-
+    lateinit var playerFile : String
 
     override fun subscribe() {
     }
@@ -59,7 +65,7 @@ class MainPresenter : MainContract.Presenter, AudioTrack.OnPlaybackPositionUpdat
     }
 
     override fun startRecordClicked() {
-        startRecording(writeWav)
+        startRecording(recordingFun)
     }
 
 
@@ -68,44 +74,47 @@ class MainPresenter : MainContract.Presenter, AudioTrack.OnPlaybackPositionUpdat
     }
 
     override fun startPlayClicked() {
-        PlayShortAudioFileViaAudioTrack(pcmFilePath)
+        mMediaPlayer.start()
+        initializeTimerTask()
     }
 
     override fun stopPlaybackClicked() {
-        player.stop()
+        mMediaPlayer.pause()
     }
 
-    override fun prepareAudioRecorder() {
-        readBufferSize = AudioRecord.getMinBufferSize(HIGH_SAMPLERATE,
-                RECORDER_CHANNELS, RECORDER_AUDIO_ENCODING)
+    fun prepareAudioRecorder(sampleRate: Int, channels: Int, encoding: Int, bufferSize: Int = 160) {
 
 //        val writeBufferSize = AudioTrack.getMinBufferSize(HIGH_SAMPLERATE, RECORDER_CHANNELS, RECORDER_AUDIO_ENCODING)
         Log.i(TAG, "prepareAudioRecorder: readBufferSize = $readBufferSize")
 
         recorder = AudioRecord(MediaRecorder.AudioSource.MIC,
-                HIGH_SAMPLERATE, RECORDER_CHANNELS,
-                RECORDER_AUDIO_ENCODING, readBufferSize * 2)
+                sampleRate, channels,
+                encoding, bufferSize)
+    }
 
-//        recorder = AudioRecord(MediaRecorder.AudioSource.MIC,
-//                HIGH_SAMPLERATE, RECORDER_CHANNELS,
-//                RECORDER_AUDIO_ENCODING, 160)
+    override fun onAmrRdChecked() {
+        prepareAudioRecorder(LOW_SAMPLERATE, RECORDER_CHANNELS, RECORDER_AUDIO_ENCODING, 160)
+        recordingFun = writeAmr
+        getFileInfo(amrFilePath)
+        prepareMediaPlayer(amrFilePath)
+    }
 
-        player = AudioTrack(AudioManager.STREAM_MUSIC,
-                HIGH_SAMPLERATE,
-                AudioFormat.CHANNEL_OUT_MONO,
-                RECORDER_AUDIO_ENCODING,
-                readBufferSize * 2,
-                MODE_STREAM)
+    override fun onMp3RdChecked() {
+        readBufferSize = AudioRecord.getMinBufferSize(HIGH_SAMPLERATE,
+                RECORDER_CHANNELS, RECORDER_AUDIO_ENCODING)
+        prepareAudioRecorder(HIGH_SAMPLERATE, RECORDER_CHANNELS, RECORDER_AUDIO_ENCODING, readBufferSize * 2)
+        recordingFun = writeMp3
+        getFileInfo(mp3FilePath)
+        prepareMediaPlayer(mp3FilePath)
+    }
 
-        player.setPlaybackPositionUpdateListener(this)
-
-        androidLame = LameBuilder()
-                .setInSampleRate(HIGH_SAMPLERATE)
-                .setOutChannels(1)
-                .setOutBitrate(32)
-                .setOutSampleRate(HIGH_SAMPLERATE)
-                .build()
-
+    override fun onWavRdChecked() {
+        readBufferSize = AudioRecord.getMinBufferSize(HIGH_SAMPLERATE,
+                RECORDER_CHANNELS, RECORDER_AUDIO_ENCODING)
+        prepareAudioRecorder(HIGH_SAMPLERATE, RECORDER_CHANNELS, RECORDER_AUDIO_ENCODING, readBufferSize * 2)
+        recordingFun = writeWav
+        getFileInfo(wavFilePath)
+        prepareMediaPlayer(wavFilePath)
     }
 
 
@@ -121,7 +130,6 @@ class MainPresenter : MainContract.Presenter, AudioTrack.OnPlaybackPositionUpdat
         recordingThread?.start()
         Log.i(TAG, "Audio Recording started")
     }
-
 
 
     private fun writeAudioDataToFile() {
@@ -200,47 +208,6 @@ class MainPresenter : MainContract.Presenter, AudioTrack.OnPlaybackPositionUpdat
         return bytes
     }
 
-    @Throws(IOException::class)
-    private fun PlayShortAudioFileViaAudioTrack(filePath: String?) {
-        // We keep temporarily filePath globally as we have only two sample sounds now..
-        if (filePath == null)
-            return
-
-        //Reading the file..
-        val file = File(filePath) // for ex. path= "/sdcard/samplesound.pcm" or "/sdcard/samplesound.wav"
-        val byteData = ByteArray(file.length().toInt())
-        Log.d(TAG, (file.length().toInt()).toString() + "")
-
-        var fis: FileInputStream
-        try {
-            fis = FileInputStream(file)
-//            Log.i(TAG, "Bytes skipped ${fis.skip((10 * bytesPerSecond))}")
-            fis.read(byteData)
-            fis.close()
-        } catch (e: FileNotFoundException) {
-            e.printStackTrace()
-        }
-
-        // Set and push to audio track..
-        Thread(Runnable {
-            Log.i(TAG, "Start playing")
-            player.play()
-            // Write the byte array to the track
-            player.write(byteData, 0, byteData.size)
-            player.stop()
-//            player.release()
-            Log.i(TAG, "Playback ended..")
-        }, "PlaybackThread").start()
-
-    }
-
-    override fun onMarkerReached(p0: AudioTrack?) {
-        Log.i(TAG, "onMarkerReached")
-    }
-
-    override fun onPeriodicNotification(p0: AudioTrack?) {
-        Log.i(TAG, "onPeriodicNotification")
-    }
 
     val writeMp3 = {
         val buffer = ShortArray(readBufferSize * 2 * 5)
@@ -248,6 +215,12 @@ class MainPresenter : MainContract.Presenter, AudioTrack.OnPlaybackPositionUpdat
 
 
         val fos = FileOutputStream(mp3FilePath)
+        androidLame = LameBuilder()
+                .setInSampleRate(HIGH_SAMPLERATE)
+                .setOutChannels(1)
+                .setOutBitrate(32)
+                .setOutSampleRate(HIGH_SAMPLERATE)
+                .build()
 
         while (isRecording) {
             // gets the voice output from microphone to byte format
@@ -283,32 +256,6 @@ class MainPresenter : MainContract.Presenter, AudioTrack.OnPlaybackPositionUpdat
         }
     }
 
-    val writePcm: (temp: Int) -> Unit = {
-        var fos: FileOutputStream? = null
-        try {
-            fos = FileOutputStream(pcmFilePath)
-        } catch (e: FileNotFoundException) {
-            e.printStackTrace()
-        }
-        val buffer = ShortArray(readBufferSize)
-
-        while (isRecording) {
-            // gets the voice output from microphone to byte format
-            val read = recorder.read(buffer, 0, readBufferSize)
-            Log.i(TAG, "Got $read bytes")
-
-            if (read > 0) {
-                try {
-                    // writes the data to file from buffer stores the voice buffer
-                    fos?.write(short2byte(buffer))
-                } catch (e: IOException) {
-                    e.printStackTrace()
-                }
-            }
-        }
-        fos?.close()
-    }
-
 
     val writeAmr = {
         var read: Int = 0
@@ -331,7 +278,7 @@ class MainPresenter : MainContract.Presenter, AudioTrack.OnPlaybackPositionUpdat
                 read = recorder.read(wavBuffer, totalRead, 160 - totalRead)
                 totalRead += read
             }
-             AmrEncoder.encode(AmrEncoder.Mode.MR122.ordinal, wavBuffer, amrBuffer)
+            AmrEncoder.encode(AmrEncoder.Mode.MR122.ordinal, wavBuffer, amrBuffer)
 //            Log.i(TAG, "writeAmr: $byteEncoded bytes encoded" )
             Log.i(TAG, Arrays.deepToString(amrBuffer.toTypedArray()))
             fos.write(amrBuffer)
@@ -343,7 +290,7 @@ class MainPresenter : MainContract.Presenter, AudioTrack.OnPlaybackPositionUpdat
     }
 
 
-    val writeWav : () -> Unit = {
+    val writeWav: () -> Unit = {
 
         val wavBuffer = ByteArray(readBufferSize * 2)
         var read: Int = 0
@@ -412,6 +359,7 @@ class MainPresenter : MainContract.Presenter, AudioTrack.OnPlaybackPositionUpdat
         Log.i(TAG, "writeWav: recording done: ${endTime - startTime} sec' recorded")
     }
 
+    var recordingFun = writeAmr
 
     fun writeWavHeader(out: OutputStream, channelMask: Int, sampleRate: Int, encoding: Int) {
         var channels: Short = 1
@@ -494,6 +442,73 @@ class MainPresenter : MainContract.Presenter, AudioTrack.OnPlaybackPositionUpdat
 
             }
         }
+    }
+
+    fun getFileInfo(path: String){
+
+        val units = arrayOf("B", "kB", "MB", "GB", "TB")
+
+
+        val file = File(path)
+        val fileSize: Long = file.length()
+
+        var inputStream: FileInputStream? = null
+        var mmr: MediaMetadataRetriever? = null
+
+        val digitGroups = (Math.log10(fileSize.toDouble()) / Math.log10(1024.0)).toInt()
+
+
+        try {
+            inputStream = FileInputStream(path)
+
+            mmr = MediaMetadataRetriever()
+            mmr.setDataSource(inputStream.fd)
+            val duration = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+            mainView.showAudioDuration(java.lang.Long.parseLong(duration))
+            mainView.showFileInfo(path, DecimalFormat("#,##0.#").format(fileSize / Math.pow(1024.0, digitGroups.toDouble())) + " " + units[digitGroups])
+        } catch (e: IOException) {
+            Log.e(TAG, "getFileInfo: ", e)
+        } catch (e: RuntimeException) {
+            Log.e(TAG, "getFileInfo: ", e)
+        } catch (e: FileNotFoundException){
+            Log.e(TAG, "getFileInfo", e)
+        }
+        finally {
+            mmr?.release()
+            inputStream?.close()
+        }
+   }
+
+    fun prepareMediaPlayer( filePath: String){
+
+
+        var fis : FileInputStream? = null
+
+        try {
+           fis = FileInputStream(filePath)
+            mMediaPlayer.reset()
+            mMediaPlayer.setDataSource(fis.fd)
+            mMediaPlayer.setAudioStreamType(AudioManager.STREAM_MUSIC)
+            mMediaPlayer.prepareAsync()
+        }catch (e: FileNotFoundException){
+            Log.e(TAG, "prepareMediaPlayer")
+        }finally {
+            fis?.close()
+        }
+    }
+
+    fun initializeTimerTask() {
+
+        mTimerTask = object : TimerTask() {
+
+            override fun run() {
+                Log.i(TAG, "timerRun:")
+                mainView.updateProgress(mMediaPlayer.currentPosition)
+                //                Log.i(TAG, "progress: " + mAudioCurrentPosition);
+            }
+        }
+        mTimer = Timer()
+        mTimer?.schedule(mTimerTask, 0, 200)
     }
 
 }

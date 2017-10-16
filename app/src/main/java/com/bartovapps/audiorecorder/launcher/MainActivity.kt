@@ -4,10 +4,10 @@ import android.Manifest
 import android.app.Activity
 import android.content.pm.PackageManager
 import android.os.Build
-import android.os.Build.VERSION_CODES.M
 import android.support.v7.app.AppCompatActivity
 import android.os.Bundle
 import android.support.v4.app.ActivityCompat
+import android.text.format.DateUtils
 import android.util.Log
 import android.widget.Toast
 import com.bartovapps.audiorecorder.BasePresenter
@@ -21,20 +21,20 @@ class MainActivity : AppCompatActivity(), MainContract.View {
         val TAG = MainActivity::class.java.simpleName
         val PERMISSIONS_REQUEST = 100
     }
-    lateinit var presenter : MainPresenter
+
+    lateinit var presenter: MainPresenter
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-        checkPermissions()
-
-        setPresenter(MainPresenter())
         Log.i(TAG, "onCreate")
+        checkPermissions()
+        setPresenter(MainPresenter(this))
 
         tbRecord.setOnClickListener({
-            if(tbRecord.isChecked){
+            if (tbRecord.isChecked) {
                 presenter.startRecordClicked()
                 tbPlayback.isEnabled = false
-            }else{
+            } else {
                 presenter.stopRecordClicked()
                 tbPlayback.isEnabled = true
             }
@@ -42,14 +42,27 @@ class MainActivity : AppCompatActivity(), MainContract.View {
 
 
         tbPlayback.setOnClickListener({
-            if(tbPlayback.isChecked){
+            if (tbPlayback.isChecked) {
                 presenter.startPlayClicked()
                 tbRecord.isEnabled = false
-            }else{
+            } else {
                 presenter.stopPlaybackClicked()
                 tbRecord.isEnabled = true
             }
         })
+
+        rdgAudioFormat.setOnCheckedChangeListener { group, checkedId ->
+
+            Log.i(TAG, "onCheckedChanged:")
+
+            when (checkedId) {
+                R.id.rdAmr -> presenter.onAmrRdChecked()
+                R.id.rdMp3 -> presenter.onMp3RdChecked()
+                R.id.rdWav -> presenter.onWavRdChecked()
+            }
+        }
+
+        rdAmr.performClick()
     }
 
 
@@ -61,6 +74,9 @@ class MainActivity : AppCompatActivity(), MainContract.View {
     }
 
     override fun showRecordingStopped() {
+        if(tbPlayback.isChecked){
+            tbPlayback.performClick()
+        }
     }
 
     override fun initButtons() {
@@ -71,7 +87,7 @@ class MainActivity : AppCompatActivity(), MainContract.View {
 
     private fun checkPermissions() {
 
-        val permissions = arrayOf( Manifest.permission.WRITE_EXTERNAL_STORAGE,
+        val permissions = arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE,
                 Manifest.permission.READ_EXTERNAL_STORAGE,
                 Manifest.permission.RECORD_AUDIO)
 
@@ -102,5 +118,20 @@ class MainActivity : AppCompatActivity(), MainContract.View {
             }
         }
         return true
+    }
+
+    override fun showFileInfo(path: String, size: String) {
+        tvFileInfo.text = path + ", " + size
+    }
+
+    override fun showAudioDuration(duration: Long) {
+        tvDuration.text = DateUtils.formatElapsedTime(duration / 1000)
+    }
+
+    override fun updateProgress(progress: Int) {
+        Log.i(TAG, "updateProgress: $progress")
+        tvProgress.post({
+            tvProgress.text = DateUtils.formatElapsedTime((progress / 1000).toLong())
+        })
     }
 }

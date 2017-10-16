@@ -13,6 +13,9 @@ interface MainContract{
         fun showPlaybackStopped()
         fun showRecordingStopped()
         fun initButtons()
+        fun showFileInfo(path: String, size: String)
+        fun showAudioDuration(duration: Long)
+        fun updateProgress(progress: Int)
     }
 
     interface Presenter : BasePresenter {
@@ -20,6 +23,8 @@ interface MainContract{
         fun stopRecordClicked()
         fun startPlayClicked()
         fun stopPlaybackClicked()
-        fun prepareAudioRecorder()
+        fun onAmrRdChecked()
+        fun onMp3RdChecked()
+        fun onWavRdChecked()
     }
 }
